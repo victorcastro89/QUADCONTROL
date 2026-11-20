@@ -19,3 +19,11 @@ $CXX -I"$Q" "$D/test_filters.cpp" "$Q/GyroFilter.cpp" -o "$D/build/test_filters"
 echo "== Seguranca e mixer =="; "$D/build/test_safety"
 echo; echo "== Laco sincrono =="; "$D/build/test_loop"
 echo; echo "== Filtros do giroscopio (ganho em cada frequencia) =="; "$D/build/test_filters"
+
+# Teste do espectro_gyro.py (precisa de: pip install pyserial numpy matplotlib)
+echo; echo "== espectro_gyro.py =="
+if python3 -c "import serial, numpy, matplotlib" 2>/dev/null; then
+  python3 "$D/test_espectro.py"
+else
+  echo "(pulado: instale pyserial numpy matplotlib para rodar)"
+fi

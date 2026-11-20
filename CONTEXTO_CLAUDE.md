@@ -79,7 +79,8 @@ Commit "Corrige cascata, banda morta do PID e yaw do modo angulo":
    - O print de 0,5 s mostra `Tick max us` (maior tempo de um tick, inclusive os prints) e `Estouros`.
 9. **Filtro do giroscópio selecionável** (etapa 4a, `GyroFilter.h/.cpp`).
    - `GYRO_FILTER_TYPE`: `GYRO_FILTER_MOVING_AVG` (**padrão**, idêntica à original, conferido em 100 000 amostras), `GYRO_FILTER_PT1` ou `GYRO_FILTER_BIQUAD` (Butterworth 2ª ordem), com corte `GYRO_LPF_HZ` e notch opcional `GYRO_NOTCH_HZ`/`GYRO_NOTCH_Q` (0 = desligado).
-   - **Registro para análise de vibração:** `GYRO_LOG 1` no `QuadController.ino` envia pela USB nativa (`SerialUSB`), a cada tick: `A`, tempo (µs), 3 brutos, 3 filtrados. O script `QuadController/espectro_gyro.m` coleta, salva `.mat`, plota o espectro bruto × filtrado e lista os 3 maiores picos acima de 20 Hz por eixo.
+   - **Registro para análise de vibração:** `GYRO_LOG 1` no `QuadController.ino` envia pela USB nativa (`SerialUSB`), a cada tick: `A`, tempo (µs), 3 brutos, 3 filtrados. O script **`QuadController/espectro_gyro.py`** (Python; `pip install pyserial numpy matplotlib`) coleta (`--porta COM17` ou `/dev/ttyACM0`), salva CSV + PNG, plota o espectro bruto × filtrado e lista os 3 maiores picos acima de 20 Hz por eixo. Também reanalisa um CSV salvo (`--arquivo`). O usuário **não tem mais MATLAB**: o antigo `espectro_gyro.m` foi removido.
+   - Teste sem hardware: `tools/sim/test_espectro.py` cria uma porta serial virtual (pty, Linux/macOS) com um "DUE falso" enviando vibrações conhecidas (85/170, 120 e 60 Hz) e amostras corrompidas; confere a coleta, o CSV, a fs e os picos.
    - Resposta medida no simulador (400 Hz):
 
      | Filtro | Atraso @10 Hz | 30 Hz | 67 Hz | 100 Hz | 133 Hz |
@@ -95,7 +96,7 @@ Commit "Corrige cascata, banda morta do PID e yaw do modo angulo":
    - `sh tools/sim/run.sh` agora roda também `test_loop` (400 ticks/s, dt = 2500 µs, atraso de 6 ms → 1 estouro e realinha) e `test_filters`. O modo `GYRO_LOG = 1` foi conferido que compila.
 
 ### Pendências de configuração (precisam do hardware)
-- **Etapa 4b (filtro):** medir a vibração com `GYRO_LOG = 1` + `espectro_gyro.m` (drone preso, com hélices, throttle perto do hover, ~10 s) e então escolher o tipo e o corte do filtro (e o notch, se houver pico claro). Comparar em voo com a média móvel trocando só `GYRO_FILTER_TYPE`.
+- **Etapa 4b (filtro):** medir a vibração com `GYRO_LOG = 1` + `espectro_gyro.py` (drone preso, com hélices, throttle perto do hover, ~10 s) e então escolher o tipo e o corte do filtro (e o notch, se houver pico claro). Comparar em voo com a média móvel trocando só `GYRO_FILTER_TYPE`.
 - **Tempo do laço:** na bancada, conferir no serial que `Tick max us` fica bem abaixo de 2500 e `Estouros` não sobe. Se subir, olhar primeiro os prints de depuração e o I²C.
 - **I²C a 400 kHz:** se aparecerem leituras estranhas, voltar `I2C_CLOCK_HZ` para 100000 (aí o laço provavelmente não cabe em 2,5 ms). `Wire.setClock` existe no core SAM 1.6.x+.
 - **Throttle de hover**: ainda não medido. Quando souber, ponha em `FS_HOVER_THROTTLE` (`Safety.h`). A descida do failsafe passa a partir de hover − 50 µs em vez do último throttle.
@@ -162,3 +163,19 @@ Registradores escritos (conferidos com teste de I²C simulado no PC):
 2. Bancada **sem hélices**: testar armar/desarmar, LED, failsafe (desligar o rádio) e as pendências de configuração da seção 2.
 3. Conferir `Tick max us`/`Estouros` e medir a vibração (etapa 4b); com o espectro, escolher o filtro.
 4. Revisar 5, 7 e 9; depois considerar 10.
+
+---
+
+## 6. Ferramentas (o usuário não tem MATLAB)
+
+- Análise e scripts: **Python** (`pyserial`, `numpy`, `matplotlib`; `scipy`/`python-control` para identificação do sistema). Os `.m` antigos do repositório podem rodar no **GNU Octave**; `.slx`/`.sid` (Simulink) não abrem sem MATLAB.
+- Gráficos de logs CSV: **PlotJuggler**. Estação de solo (futuro, via MAVLink): **QGroundControl**.
+- `.mat` antigos (`voo1.mat`, `voo2.mat`, ...): `scipy.io.loadmat`.
+
+## 7. Ideias para o kit de telemetria (ainda não implementadas)
+
+O usuário comprou um kit de telemetria (modelo ainda não informado; provavelmente rádios SiK 433/915 MHz, serial transparente a 57600).
+- Ligar na **`Serial1`** (TX1 = 18, RX1 = 19): `Serial2` (16/17) e `Serial3` (14) conflitam com os motores, e `Serial` é a porta de programação.
+- Ideias, em ordem sugerida: testar o link → **MAVLink básico + QGroundControl** (atitude, estado, canais, motores) → parâmetros via MAVLink para ajustar os PIDs → script Python gravando CSV (medir o throttle de hover, identificação do sistema) → tensão da bateria (divisor; ADC do DUE ≤ 3,3 V) → futuro GPS/altitude.
+- Limites: ~5 kB/s (não dá giroscópio bruto a 400 Hz), envio não bloqueante para não estourar o tick, não substitui o rádio de controle, conferir a frequência na Anatel.
+

@@ -20,8 +20,8 @@ void read_sensors() {
 }
 
 // Modo de registro p/ analise de vibracao (GYRO_LOG = 1): pela USB nativa do DUE,
-// no formato dos scripts MATLAB ('A', tempo em us, 3 brutos, 3 filtrados).
-// Ler com espectro_gyro.m.
+// uma linha cada: 'A', tempo em us, 3 brutos, 3 filtrados.
+// Ler com espectro_gyro.py (Python: pip install pyserial numpy matplotlib).
 void Log_Gyro(){
 #if GYRO_LOG
   if(!SerialUSB) return;

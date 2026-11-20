@@ -3,7 +3,7 @@
  *
  * O PADRAO e a media movel de 6 amostras, identica a de antes (inclusive a
  * divisao inteira). Os outros tipos existem para comparar depois de medir o
- * espectro de vibracao (modo de registro em Sensors.ino + espectro_gyro.m).
+ * espectro de vibracao (GYRO_LOG + espectro_gyro.py).
  *
  *   Filtro (corte ~30 Hz)     atraso em baixa freq.   atenuacao em 100 Hz
  *   media movel de 6          6,25 ms                 forte (zeros 67/133 Hz)
