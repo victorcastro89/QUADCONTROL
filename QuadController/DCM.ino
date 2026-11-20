@@ -92,29 +92,29 @@ void Pid_Init(){
   Pitch_PID.SetMode(AUTOMATIC);
   Pitch_PID.SetSampleTime(2500);
   Pitch_PID.SetOutputLimits(-20000, 20000);
-  Pitch_PID.ErrorTolerance(0.02);
+  Pitch_PID.ErrorTolerance(0.002);  // rad (~0,1 grau): so congela o I
 
   Roll_PID.SetMode(AUTOMATIC);
   Roll_PID.SetSampleTime(2500);
   Roll_PID.SetOutputLimits(-20000, 20000);
-  Roll_PID.ErrorTolerance(0.02);
+  Roll_PID.ErrorTolerance(0.002);   // rad (~0,1 grau)
 
   Yaw_PID.SetMode(AUTOMATIC);
   Yaw_PID.SetSampleTime(2400);
   Yaw_PID.SetOutputLimits(- 20000,  20000);
-    Yaw_PID.ErrorTolerance(0.02);
+  Yaw_PID.ErrorTolerance(0.002);    // rad (~0,1 grau)
   PitchRate_PID.SetMode(AUTOMATIC);
   PitchRate_PID.SetSampleTime(2500);
   PitchRate_PID.SetOutputLimits(-150 , 150);
-  PitchRate_PID.ErrorTolerance(300);
+  PitchRate_PID.ErrorTolerance(30);  // LSB do giro (~0,5 grau/s)
 
   RollRate_PID.SetMode(AUTOMATIC);
   RollRate_PID.SetSampleTime(2500);
   RollRate_PID.SetOutputLimits(-150, 150);
-  RollRate_PID.ErrorTolerance(300);
+  RollRate_PID.ErrorTolerance(30);   // LSB do giro (~0,5 grau/s)
 
   YawRate_PID.SetMode(AUTOMATIC);
   YawRate_PID.SetSampleTime(2500);
   YawRate_PID.SetOutputLimits(-150, 150);
-  YawRate_PID.ErrorTolerance(500);
+  YawRate_PID.ErrorTolerance(30);    // LSB do giro (~0,5 grau/s)
 }

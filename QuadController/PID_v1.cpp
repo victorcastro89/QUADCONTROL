@@ -21,7 +21,11 @@ PID_::PID_(double* Input, double* Output, double* Setpoint,
         double Kp, double Ki, double Kd, int ControllerDirection)
 {
 	Filter_DSTATE = 0;
-FilterCoefficient=0;
+	FilterCoefficient=0;
+	error_min = 0;
+	ITerm = 0;
+	lastInput = 0;
+	output = 0;
     myOutput = Output;
     myInput = Input;
     mySetpoint = Setpoint;
@@ -53,32 +57,34 @@ bool PID_::Compute()
    if(timeChange>=SampleTime)
    {
       /*Compute all the working error variables*/
-	  double input = *myInput;
+      double input = *myInput;
       double error = *mySetpoint - input;
-	 if(error>error_min || error<error_min){
-		 
-      ITerm+= (ki * error);
-      if(ITerm > outMax) ITerm= outMax;
-      else if(ITerm < outMin) ITerm= outMin;
-      
+
+      /* Banda morta so no integrador: dentro da tolerancia o I fica parado,
+         mas P e D continuam atuando e a saida e sempre atualizada.
+         (Antes: "error>error_min || error<error_min", sempre verdadeiro.) */
+      if(fabs(error) > error_min){
+        ITerm+= (ki * error);
+        if(ITerm > outMax) ITerm= outMax;
+        else if(ITerm < outMin) ITerm= outMin;
+      }
+
+      /* Derivada filtrada (forma discreta do Simulink, N = 284, Ts = 2,5 ms) */
       FilterCoefficient = (kd * error - Filter_DSTATE) * 284;//162
-      
-      double dInput = (input - lastInput);
-   
+
       /*Compute PID Output*/
       output = kp * error + ITerm + FilterCoefficient;
-     Filter_DSTATE += 0.0025 * FilterCoefficient;
-	  if(output > outMax) output = outMax;
+      Filter_DSTATE += 0.0025 * FilterCoefficient;
+      if(output > outMax) output = outMax;
       else if(output < outMin) output = outMin;
-	  *myOutput = output;
-	  
+      *myOutput = output;
+
       /*Remember some variables for next time*/
       lastInput = input;
       lastTime = now;
-	  return true;
-	 }
+      return true;
    }
-   else return false;
+   return false;
 }
 
 
@@ -178,6 +184,8 @@ void PID_::Reset(){
 	
 	ITerm = 0;
 	output = 0;
+	Filter_DSTATE = 0;
+	FilterCoefficient = 0;
 	lastInput=0;
 lastTime=0;
 *myOutput=0;

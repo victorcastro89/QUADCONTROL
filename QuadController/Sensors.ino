@@ -281,7 +281,12 @@ void Read_Gyro()
     gyro_roll += 0.00030543261909*RollRate_Input* delta_t;
     gyro_angle[0] = gyro_angle[0]*0.9995 + Pitch_angle_acc*0.0005 ;
     gyro_angle[1] = gyro_angle[1]*0.9995+ Roll_angle_acc*0.0005 ;
-    gyro_angle[2] =   gyro_angle[2]*0.99 + MAG_Heading*0.01 ;
+    // Fusao giro + bussola com a diferenca "embrulhada" em [-pi, pi]:
+    // MAG_Heading salta de +pi para -pi perto do sul e a media direta puxava
+    // a proa estimada para o lado errado. Assim gyro_angle[2] fica continuo.
+    double mag_err = MAG_Heading - gyro_angle[2];
+    mag_err = atan2(sin(mag_err), cos(mag_err));
+    gyro_angle[2] += 0.01*mag_err;
     Yaw_Input = - (gyro_angle[2] -Yaw_offset);
     Pitch_Input = -gyro_angle[0];
     Roll_Input = gyro_angle[1];
