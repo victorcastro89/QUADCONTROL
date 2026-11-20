@@ -9,6 +9,22 @@
 #include <Adafruit_BMP085_U.h>    // biblioteca oficial (barometro)
 #include "GY80.h"                 // drivers proprios: ADXL345 e L3G4200D
 #include "Safety.h"               // armar/desarmar, failsafe, limites dos motores
+#include "GyroFilter.h"           // filtro do giroscopio selecionavel
+
+/* ---------- Laco sincrono (item 6) ---------- */
+#define LOOP_PERIOD_US   2500     // tick fixo: 400 Hz
+#define MAG_EVERY_TICKS  8        // bussola a 50 Hz
+#define I2C_CLOCK_HZ     400000   // 100000 se aparecerem erros de I2C
+#define GYRO_LOG         0        // 1 = registra o giroscopio pela USB nativa (bancada)
+
+unsigned long next_tick = 0;      // instante do proximo tick (us)
+unsigned long last_tick_start = 0;
+long tick_dt = LOOP_PERIOD_US;    // dt medido entre ticks (us), usado na integracao
+unsigned long tick_exec_max = 0;  // maior tempo de execucao de um tick desde o ultimo print
+unsigned long tick_overruns = 0;  // ticks que passaram de LOOP_PERIOD_US
+
+GyroAxisFilter gyro_filter[3];    // um filtro por eixo (Sensors.ino)
+int gyro_raw[3];                  // giroscopio sem filtro, ja sem offset
    
 Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
 int compass_flag=0;
@@ -68,10 +84,6 @@ int soma_acc[3];
 int buffer_acc[3][tamanho_acc];
 int indice_acc;
 
-#define tamanho_gyr 6
-int soma_gyr[3];
-int buffer_gyr[3][tamanho_gyr];
-int indice_gyr;
 
 int M1_out=1000;
 int M2_out=1000;
@@ -162,7 +174,6 @@ void setup()
 int j;
 for (j=0;j<3;j++){
  soma_acc[j]=0; 
-  soma_gyr[j]=0;
 }
 PitchRate_Input_ = 0;RollRate_Input_ = 0;YawRate_Input_ = 0;
   RollRate_Setpoint = 0;
@@ -200,18 +211,36 @@ PitchRate_Input_ = 0;RollRate_Input_ = 0;YawRate_Input_ = 0;
     bmp_init();
   Magn_Init();
   Gyro_Init();
+  I2C_Set_Clock();   // 400 kHz depois de configurar e calibrar os sensores
+#if GYRO_LOG
+  SerialUSB.begin(0); // USB nativa: a velocidade e ignorada
+#endif
   
   // Read sensors, init DCM algorithm
   delay(20);  // Give sensors enough time to collect data
   
   
  //startTimer(TC2, 2, TC8_IRQn, 800);
- 
+  next_tick = micros();
+  last_tick_start = next_tick;
 }
 
 
 
 void loop() {
+
+  // Tick fixo de LOOP_PERIOD_US: tudo abaixo roda uma vez por tick, em ordem
+  // (sensores -> radio/seguranca -> PIDs de angulo -> PIDs de taxa -> motores).
+  unsigned long tick_start = micros();
+  if ((long)(tick_start - next_tick) < 0) return;
+  tick_dt = tick_start - last_tick_start;
+  last_tick_start = tick_start;
+  next_tick += LOOP_PERIOD_US;
+  if ((long)(tick_start - next_tick) >= 0) {
+    // Atrasou mais de um periodo: conta e realinha, sem tentar "recuperar".
+    tick_overruns++;
+    next_tick = tick_start + LOOP_PERIOD_US;
+  }
 
    read_sensors();
 /* 
@@ -335,8 +364,8 @@ timer = millis();
   
   
   if(anglemode){
-    Pitch_PID.Compute();
-    Roll_PID.Compute();
+    Pitch_PID.ComputeNow();
+    Roll_PID.ComputeNow();
 
     // Yaw: enquanto o stick esta fora do centro (ou o drone ainda gira rapido
     // depois de solta-lo) a proa desejada acompanha a proa atual; depois de
@@ -347,7 +376,7 @@ timer = millis();
       Yaw_PID.Reset();
     }
     else
-      Yaw_PID.Compute();
+      Yaw_PID.ComputeNow();
 
     // Cascata: saida da malha de angulo -> setpoint da malha de taxa, todo ciclo.
     RollRate_Setpoint = Roll_Output;
@@ -360,16 +389,14 @@ timer = millis();
       YawRate_Setpoint = Yaw_Output;     // segura a proa
   }
 
-  if(PitchRate_PID.Compute()){
-  PidTime = micros()-previousTime;
-  previousPidTime =micros();
-  }
-  RollRate_PID.Compute() ;
-  YawRate_PID.Compute() ;
+  PitchRate_PID.ComputeNow();
+  RollRate_PID.ComputeNow();
+  YawRate_PID.ComputeNow();
 
   // Limites, saturacao e estados (desarmado / no chao / em voo): Output.ino.
   Mix_Motors();
   Update_LED();
+  Log_Gyro();
 
 #if 1
   long t2 = micros();
@@ -407,6 +434,12 @@ timer = millis();
             Serial.println(Yaw_Output);
                  Serial.print("MAG=" );
             Serial.println(MAG_Heading);
+      // Diagnostico do laco: deve ficar bem abaixo de LOOP_PERIOD_US e sem estouros.
+      Serial.print("Tick max us=");
+      Serial.println(tick_exec_max);
+      Serial.print("Estouros=");
+      Serial.println(tick_overruns);
+      tick_exec_max = 0;
       //Print_angle_acc();
       //Print_Acc_Offset();
    //Print_Gyr();
@@ -477,6 +510,9 @@ Serial.println(TO_DEG(MAG_Heading));
 
 
 endtime = micros();
+  // Tempo do tick inteiro (inclui os prints de depuracao acima).
+  unsigned long tick_exec = endtime - tick_start;
+  if (tick_exec > tick_exec_max) tick_exec_max = tick_exec;
 
 
 

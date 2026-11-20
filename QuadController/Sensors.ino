@@ -20,6 +20,14 @@ void I2C_Init()
 {
   Wire.begin();
 }
+
+// Chamado depois de inicializar todos os sensores. Os 4 chips da GY-80 aceitam
+// 400 kHz; a 100 kHz (padrao) as leituras ocupavam quase todo o ciclo de 2,5 ms.
+// Se aparecerem erros de leitura (fios longos, pull-ups fracos), use 100000.
+void I2C_Set_Clock()
+{
+  Wire.setClock(I2C_CLOCK_HZ);
+}
 void  bmp_init(void){
 if(!bmp.begin(BMP085_MODE_ULTRALOWPOWER))
   {
@@ -217,7 +225,10 @@ void Gyro_Init()
   Gyr.enableDefault();
     Gyr.setFilterMode(0b11);
     Gyr.setHighPassOnOff(1);
-    Gyr.setOutputDataRate(400);
+    // 800 Hz lido a 400 Hz: a amostra usada nunca tem mais de 1,25 ms, e o
+    // relogio do sensor nao "bate" com o do laco (amostra repetida/pulada).
+    // O passa-baixa interno continua em ~50 Hz (BW = 10 tambem a 800 Hz).
+    Gyr.setOutputDataRate(800);
     Gyr.scale(500);
     calibra_gyr();
     
@@ -227,7 +238,7 @@ void Gyro_Init()
    long sumx=0,sumy=0,sumz=0;
    int i;
    for(i=0;i<1000;i++){
-     Read_Gyro();
+     Gyr.read();   // so a leitura bruta: nao integra angulo nem alimenta o filtro
    sumx+= Gyr.g.x ;
    sumy+= Gyr.g.y ;
    sumz+= Gyr.g.z ;
@@ -236,6 +247,7 @@ void Gyro_Init()
    GxOffset =  sumx/1000;
    GyOffset =  sumy/1000;
    GzOffset =  sumz/1000;
+   for(i=0;i<3;i++) gyro_filter[i].reset();
  
  
  
@@ -250,27 +262,14 @@ void Read_Gyro()
   Gyr.read();
  
 
-  double delta_t = (double)delta_gyro/1000000;
-    soma_gyr[0] += -buffer_gyr[0][indice_gyr]; 
-    soma_gyr[1] += -buffer_gyr[1][indice_gyr]; 
-    soma_gyr[2] += -buffer_gyr[2][indice_gyr]; 
-    soma_gyr[0] += +(int)(Gyr.g.x - GxOffset); 
-    soma_gyr[1] += +(int)(Gyr.g.y - GyOffset); 
-    soma_gyr[2] += +(int)(Gyr.g.z - GzOffset); 
-    
-    buffer_gyr[0][indice_gyr] = (int)(Gyr.g.x - GxOffset);
-    buffer_gyr[1][indice_gyr] = (int)(Gyr.g.y - GyOffset);
-    buffer_gyr[2][indice_gyr] = (int)(Gyr.g.z - GzOffset);
-    
-    if(indice_gyr==(tamanho_gyr-1))
-    indice_gyr=0;
-    else 
-    indice_gyr++;
-    
-    gyro[0] = soma_gyr[0]/tamanho_gyr;
-    gyro[1] = soma_gyr[1]/tamanho_gyr;
-    gyro[2] = soma_gyr[2]/tamanho_gyr;
-  
+  double delta_t = (double)delta_gyro/1000000;   // dt medido do tick (us -> s)
+
+  // Filtro selecionavel (GyroFilter.h). Padrao: media movel de 6, igual antes.
+  gyro_raw[0] = (int)(Gyr.g.x - GxOffset);
+  gyro_raw[1] = (int)(Gyr.g.y - GyOffset);
+  gyro_raw[2] = (int)(Gyr.g.z - GzOffset);
+  for(int i=0;i<3;i++) gyro[i] = gyro_filter[i].apply(gyro_raw[i]);
+
     PitchRate_Input = -gyro[0];//  *  0.2738 + 0.7262*PitchRate_Input_;
     RollRate_Input = -gyro[1];// * 0.2738 + 0.7262*RollRate_Input_;
     YawRate_Input =  -gyro[2];//  * 0.2738 + 0.7262*YawRate_Input_;

@@ -3,64 +3,35 @@
 // DCM algorithm
 
 
+// Chamado uma vez por tick (2500 us) pelo loop(); delta_gyro = dt medido do tick.
+// Giroscopio e acelerometro a cada tick; bussola a cada MAG_EVERY_TICKS (50 Hz).
+// (O barometro continua desligado; a versao antiga esta no historico do git.)
 void read_sensors() {
-   delta_gyro =micros()-Last_TimeGyro;
-  if(delta_gyro >=2500){
-    
-       //  Serial.println(micros()-Last_TimeGyro);                                     
-	Read_Gyro();                  
-        Last_TimeGyro = micros();
-      delta_gyro_aux=delta_gyro;
-       
+  static int mag_count = 0;
+  delta_gyro = tick_dt;
+  Read_Gyro();
+  delta_gyro_aux = delta_gyro;
+  Read_Accel();
+  if(++mag_count >= MAG_EVERY_TICKS){
+    mag_count = 0;
+    Read_Magn();
+    Compass_Heading();
   }
-  delta_acc = micros()-Last_TimeAcc;
-   if(delta_acc>=2500){
-	Read_Accel();                      
-                          
-	Last_TimeAcc = micros();
-delta_acc_aux=delta_acc;
 }
-  delta_mag=millis()-Last_TimeMag;
-   if(delta_mag>=20){
-        Read_Magn();                     
-	Last_TimeMag = millis();
-        Compass_Heading();
-        
-       //Compass_compensate();
-  
-        delta_mag_aux=delta_mag;
-}
-/*
-delta_bmp=millis()-Last_Timebmp;
-   if(delta_bmp>=6){
-        Read_bpm();              
-	Last_Timebmp= millis();
-        bpm_cont++;
-        
-        Soma_pressure +=pressure;
-        Soma_temperature +=  temperature;
- if(bpm_cont==10){
-   
-   pressure=Soma_pressure/10;
-  temperature = Soma_temperature/10;
-     float seaLevelPressure = 1009.25;
-  
-    altitude =bmp.pressureToAltitude(seaLevelPressure,
-                                        pressure,
-                                        temperature);
 
-     Print_Bpm();
-    Soma_pressure=0;
-    Soma_temperature=0;
-    bpm_cont=0;
- }
+// Modo de registro p/ analise de vibracao (GYRO_LOG = 1): pela USB nativa do DUE,
+// no formato dos scripts MATLAB ('A', tempo em us, 3 brutos, 3 filtrados).
+// Ler com espectro_gyro.m.
+void Log_Gyro(){
+#if GYRO_LOG
+  if(!SerialUSB) return;
+  SerialUSB.println('A');
+  SerialUSB.println((long)micros());
+  for(int i=0;i<3;i++) SerialUSB.println(gyro_raw[i]);
+  for(int i=0;i<3;i++) SerialUSB.println(gyro[i]);
+#endif
+}
 
-   
-}
- */
-//Pitch_Input = gyro_angle[1]*0.96 + Pitch_angle*0.04;
-//Roll_Input = gyro_angle[0]*0.96 + Roll_angle*0.04;
-}
 // Apply calibration to raw sensor readings
 void compensate_sensor_errors() {
   /*

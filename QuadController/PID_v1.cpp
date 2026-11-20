@@ -50,12 +50,22 @@ PID_::PID_(double* Input, double* Output, double* Setpoint,
  *   pid Output needs to be computed.  returns true when the output is computed,
  *   false when nothing has been done.
  **********************************************************************************/ 
+/* Compute(): calcula so se passou SampleTime desde a ultima vez (original).
+ * ComputeNow(): calcula sempre. Usado pelo laco sincrono de 400 Hz, que ja
+ * garante o periodo; evita pular um ciclo quando o tick chega alguns us antes
+ * de SampleTime. Os ganhos continuam calculados para SampleTime. */
 bool PID_::Compute()
 {
    if(!inAuto) return false;
+   unsigned long timeChange = (micros() - lastTime);
+   if(timeChange < SampleTime) return false;
+   return ComputeNow();
+}
+
+bool PID_::ComputeNow()
+{
+   if(!inAuto) return false;
    unsigned long now = micros();
-   unsigned long timeChange = (now - lastTime);
-   if(timeChange>=SampleTime)
    {
       /*Compute all the working error variables*/
       double input = *myInput;
@@ -85,7 +95,6 @@ bool PID_::Compute()
       lastTime = now;
       return true;
    }
-   return false;
 }
 
 

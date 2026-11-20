@@ -69,7 +69,35 @@ Commit "Corrige cascata, banda morta do PID e yaw do modo angulo":
    - O mapeamento dos sticks foi simplificado para `(pulso − 1484) × ganho`, com os mesmos sinais e escalas de antes (pulso limitado a 1000–2000 µs).
    - **Simulação no PC:** `sh tools/sim/run.sh` compila o sketch inteiro com stubs de hardware e roda 19 cenários (armar, voo, saturação, perda de rádio, rádio voltando no failsafe, pulso inválido, desarmar, auto-desarme, armar inclinado). Todos passam.
 
+8. **Laço síncrono a 400 Hz** (item 6, `QuadController.ino`, `DCM.ino`, `PID_v1`).
+   - `loop()` só executa a cada tick de `LOOP_PERIOD_US` (2500 µs, contado com `micros()`), uma vez e nesta ordem: sensores → rádio/segurança → PIDs de ângulo → PIDs de taxa → motores → LED → registro.
+   - Se um tick atrasar mais de um período, ele conta um estouro (`tick_overruns`) e realinha, sem disparar uma rajada de ticks.
+   - `read_sensors()` é chamado pelo tick: giroscópio e acelerômetro a cada tick, bússola a cada `MAG_EVERY_TICKS` (8 → 50 Hz). `delta_gyro` = dt **medido** do tick (`tick_dt`).
+   - PIDs usam `ComputeNow()` (calcula sempre; o tick dá o período). `Compute()` antigo continua existindo. Os ganhos não mudaram.
+   - I²C a 400 kHz (`I2C_CLOCK_HZ`, `Wire.setClock` chamado depois de iniciar e calibrar os sensores). Antes, a 100 kHz, as leituras ocupavam ~68–100% do ciclo.
+   - Giroscópio com ODR de 800 Hz lido a 400 Hz (amostra com no máximo 1,25 ms; LPF interno continua ~50 Hz). `calibra_gyr()` agora só lê (`Gyr.read()`) e zera os filtros no fim.
+   - O print de 0,5 s mostra `Tick max us` (maior tempo de um tick, inclusive os prints) e `Estouros`.
+9. **Filtro do giroscópio selecionável** (etapa 4a, `GyroFilter.h/.cpp`).
+   - `GYRO_FILTER_TYPE`: `GYRO_FILTER_MOVING_AVG` (**padrão**, idêntica à original, conferido em 100 000 amostras), `GYRO_FILTER_PT1` ou `GYRO_FILTER_BIQUAD` (Butterworth 2ª ordem), com corte `GYRO_LPF_HZ` e notch opcional `GYRO_NOTCH_HZ`/`GYRO_NOTCH_Q` (0 = desligado).
+   - **Registro para análise de vibração:** `GYRO_LOG 1` no `QuadController.ino` envia pela USB nativa (`SerialUSB`), a cada tick: `A`, tempo (µs), 3 brutos, 3 filtrados. O script `QuadController/espectro_gyro.m` coleta, salva `.mat`, plota o espectro bruto × filtrado e lista os 3 maiores picos acima de 20 Hz por eixo.
+   - Resposta medida no simulador (400 Hz):
+
+     | Filtro | Atraso @10 Hz | 30 Hz | 67 Hz | 100 Hz | 133 Hz |
+     |---|---|---|---|---|---|
+     | Média móvel 6 (padrão) | 6,25 ms | −3,0 dB | −46,5 dB | −12,6 dB | −51,9 dB |
+     | PT1 30 Hz | 4,98 ms | −3,9 | −8,9 | −11,5 | −13,2 |
+     | Biquad 30 Hz | 7,62 ms | −3,0 | −15,5 | −24,8 | −34,2 |
+     | PT1 70 Hz | 2,22 ms | −1,4 | −4,4 | −6,5 | −7,9 |
+     | Biquad 70 Hz | 2,91 ms | −0,1 | −2,6 | −9,1 | −18,0 |
+     | Biquad 70 Hz + notch 133 Hz | 3,27 ms | −0,1 | −2,7 | −9,8 | −143 |
+
+     Conclusão: com o mesmo corte (~30 Hz), trocar o tipo de filtro quase não ajuda. O ganho vem de subir o corte (70 Hz ≈ metade do atraso), o que só é seguro conhecendo o espectro de vibração.
+   - `sh tools/sim/run.sh` agora roda também `test_loop` (400 ticks/s, dt = 2500 µs, atraso de 6 ms → 1 estouro e realinha) e `test_filters`. O modo `GYRO_LOG = 1` foi conferido que compila.
+
 ### Pendências de configuração (precisam do hardware)
+- **Etapa 4b (filtro):** medir a vibração com `GYRO_LOG = 1` + `espectro_gyro.m` (drone preso, com hélices, throttle perto do hover, ~10 s) e então escolher o tipo e o corte do filtro (e o notch, se houver pico claro). Comparar em voo com a média móvel trocando só `GYRO_FILTER_TYPE`.
+- **Tempo do laço:** na bancada, conferir no serial que `Tick max us` fica bem abaixo de 2500 e `Estouros` não sobe. Se subir, olhar primeiro os prints de depuração e o I²C.
+- **I²C a 400 kHz:** se aparecerem leituras estranhas, voltar `I2C_CLOCK_HZ` para 100000 (aí o laço provavelmente não cabe em 2,5 ms). `Wire.setClock` existe no core SAM 1.6.x+.
 - **Throttle de hover**: ainda não medido. Quando souber, ponha em `FS_HOVER_THROTTLE` (`Safety.h`). A descida do failsafe passa a partir de hover − 50 µs em vez do último throttle.
 - **Failsafe do receptor**: configurar o receptor para, ao perder sinal, **parar de mandar pulsos** ou mandar throttle < 900 µs. Se ele repetir o último pulso, o firmware nunca detecta a perda.
 - **Faixa dos ESCs**: o código assume calibração em 1000–2000 µs (`MOTOR_MAX`). Confirmar, e verificar se 1080 µs (`MOTOR_IDLE`) gira os motores devagar e 1100 µs (`MOTOR_MIN`) não para nenhum deles.
@@ -83,9 +111,9 @@ Commit "Corrige cascata, banda morta do PID e yaw do modo angulo":
 1–3. ~~Failsafe, armar/desarmar e limites dos motores~~ → **feitos** (seção 2, item 7). Restam as pendências de configuração listadas lá.
 
 ### Qualidade do controle
-4. **Média móvel de 6 amostras no giroscópio**: ~6 ms de atraso de fase na malha de taxa, o maior limitante de ganho. Trocar por um passa-baixa de 1ª ordem ou biquad (~80 Hz).
+4. **Filtro do giroscópio**: etapa 4a **feita** (seção 2, item 9). Falta a **4b**: medir a vibração e escolher o filtro e o corte.
 5. **Passa-alta do L3G** (`Gyr.setHighPassOnOff(1)`): com OUT_Sel = 00 ele **não entra no dado lido**, então provavelmente não tem efeito (ver seção 4). Pode ser removido para ficar explícito.
-6. **Laço sem sincronia**: sensores, PIDs e motores rodam com timers independentes, com jitter de até 2,5 ms. O ideal é um tick fixo de 400 Hz: ler → filtrar → PIDs → motores. Usar I²C a 400 kHz (`Wire.setClock(400000)`), porque a leitura bloqueante da bússola rouba tempo do laço.
+6. ~~Laço sem sincronia~~ → **feito** (seção 2, item 8). Falta conferir o tempo do laço na bancada.
 7. **Windup no chão**: o I da malha de ângulo (limitado a ±20000) acumula com throttle > 1100 antes de decolar. Limitar esse I bem menos e só integrar acima de um throttle de decolagem.
 8. **Derivada sobre o erro** (pico quando o setpoint muda). Hoje o D é muito pequeno; se aumentar, trocar para derivada sobre a medida.
 
@@ -116,7 +144,7 @@ Registradores escritos (conferidos com teste de I²C simulado no PC):
 | `Xofset/Yofset/Zofset` | 0x1E/0x1F/0x20 | int8 | 15,6 mg/LSB = 4 contagens (daí o `/4`) |
 | `getRaw()` | DATAX0.. 0x32 | 6 bytes | contagens brutas, não m/s² |
 | `Gyr.init()` | WHO_AM_I 0x0F | 0xD3 | procura em 0x69 (GY-80) e 0x68 |
-| `enableDefault()` + `setOutputDataRate(400)` | CTRL_REG1 0x20 | **0xAF** | 400 Hz, BW = 10 (LPF1 ≈ 50 Hz) |
+| `enableDefault()` + `setOutputDataRate(800)` | CTRL_REG1 0x20 | **0xEF** | 800 Hz, BW = 10 (LPF1 ≈ 50 Hz). Antes do item 8 era 400 Hz (0xAF) |
 | `setFilterMode(0b11)` | CTRL_REG2 0x21 | 0x30 | HPM = 11, HPCF padrão |
 | `scale(500)` | CTRL_REG4 0x23 | 0x10 | 17,5 mdps/LSB |
 | `setHighPassOnOff(1)` | CTRL_REG5 0x24 | 0x10 | HPen = 1, OUT_Sel = 00 → HPF fora do dado |
@@ -132,5 +160,5 @@ Registradores escritos (conferidos com teste de I²C simulado no PC):
 
 1. Compilar com `arduino-cli` (core `arduino:sam` + as 2 bibliotecas Adafruit) e fazer a checagem em bancada da seção 4.
 2. Bancada **sem hélices**: testar armar/desarmar, LED, failsafe (desligar o rádio) e as pendências de configuração da seção 2.
-3. Itens 4 e 6 (filtro do giroscópio e laço síncrono a 400 Hz), provavelmente o maior ganho de estabilidade.
+3. Conferir `Tick max us`/`Estouros` e medir a vibração (etapa 4b); com o espectro, escolher o filtro.
 4. Revisar 5, 7 e 9; depois considerar 10.
