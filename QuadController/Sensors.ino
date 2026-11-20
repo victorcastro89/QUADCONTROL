@@ -37,8 +37,8 @@ void Accel_Init()
     Serial.println("Ooops, no ADXL345 detected ... Check your wiring!");
     while(1);
   }
-  accel.setRange(ADXL345_RANGE_16_G);
-  accel.setDataRate(ADXL345_DATARATE_400_HZ);
+  accel.setRange(GY80_ADXL_RANGE_16_G);
+  accel.setDataRate(GY80_ADXL_DATARATE_400_HZ);
  // calibra_acc();
 set_acc_offset();
 

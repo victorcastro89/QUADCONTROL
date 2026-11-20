@@ -1,23 +1,20 @@
 
-#include "I2Cdev.h"
-#include <L3G.h>
 #include <Wire.h>
-#include <PWM.h>
 #include "DCM.h"
 
 #include "Capture_Functions.h"
 #include "PID_v1.h"
 #include "Servo.h"
-#include <Adafruit_Sensor.h>
-#include <Adafruit_ADXL345_U.h>
-#include <Adafruit_BMP085_U.h>
+#include <Adafruit_Sensor.h>      // biblioteca oficial (tipos sensors_event_t)
+#include <Adafruit_BMP085_U.h>    // biblioteca oficial (barometro)
+#include "GY80.h"                 // drivers proprios: ADXL345 e L3G4200D
    
 Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
 int compass_flag=0;
-L3G Gyr;
+GY80_Gyro Gyr;
 long aux;
 float gyro_pitch,gyro_roll ;
-Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(1);
+GY80_Accel accel;
 sensors_event_t event; 
   
 struct capture Roll;
