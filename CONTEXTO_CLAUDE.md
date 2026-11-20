@@ -58,15 +58,29 @@ Commit "Corrige cascata, banda morta do PID e yaw do modo angulo":
 5. Removidos bytes NUL corrompidos no fim de `QuadController.ino` e `DCM.h`.
 6. **Drivers próprios `GY80.h/.cpp`** substituem as bibliotecas modificadas (ver seção 4).
    Também foram removidos `#include "I2Cdev.h"` e `<PWM.h>`, que não eram usados.
+7. **Segurança: armar/desarmar, failsafe e limites dos motores** (`Safety.h`, `Safety.ino`, `Mix_Motors()` em `Output.ino`). Todas as constantes estão em `Safety.h`.
+   - Estados: `DESARMADO` → `ARMADO` → `FAILSAFE`. O drone liga desarmado (motores em 1000 µs).
+   - **Armar:** throttle < 1100 + yaw > 1900 µs por 1 s, com rádio válido e inclinação < 25°.
+   - **Desarmar:** throttle < 1100 + yaw < 1100 µs por 1 s, ou 15 s armado com throttle baixo, ou fim do failsafe.
+   - **Rádio:** o frame só vale com os 4 pulsos entre 900 e 2100 µs. Os pulsos são copiados para variáveis locais e o código não escreve mais em `Throttle.T_alto`. Sem frame válido por 250 ms → `FAILSAFE`.
+   - **Failsafe:** modo Angle nivelado, segurando a proa, sticks e Ch6 ignorados. O throttle desce em rampa de 50 µs/s a partir do último valor; ao chegar a 1100 µs, ou após 10 s, desarma. Se o rádio voltar, termina a descida mesmo assim.
+   - **Motores:** desarmado = 1000; armado no chão = 1080 (hélices girando devagar); em voo, cada motor fica em [1100, 2000]. Se as correções não cabem na faixa, são reduzidas proporcionalmente; depois o throttle é deslocado para todos caberem. Anti-windup: com saturação, os integradores das malhas de taxa param (`PID_::HoldIntegrator`).
+   - **LED 13:** pisca devagar = desarmado; aceso = armado; pisca rápido = failsafe.
+   - O mapeamento dos sticks foi simplificado para `(pulso − 1484) × ganho`, com os mesmos sinais e escalas de antes (pulso limitado a 1000–2000 µs).
+   - **Simulação no PC:** `sh tools/sim/run.sh` compila o sketch inteiro com stubs de hardware e roda 19 cenários (armar, voo, saturação, perda de rádio, rádio voltando no failsafe, pulso inválido, desarmar, auto-desarme, armar inclinado). Todos passam.
+
+### Pendências de configuração (precisam do hardware)
+- **Throttle de hover**: ainda não medido. Quando souber, ponha em `FS_HOVER_THROTTLE` (`Safety.h`). A descida do failsafe passa a partir de hover − 50 µs em vez do último throttle.
+- **Failsafe do receptor**: configurar o receptor para, ao perder sinal, **parar de mandar pulsos** ou mandar throttle < 900 µs. Se ele repetir o último pulso, o firmware nunca detecta a perda.
+- **Faixa dos ESCs**: o código assume calibração em 1000–2000 µs (`MOTOR_MAX`). Confirmar, e verificar se 1080 µs (`MOTOR_IDLE`) gira os motores devagar e 1100 µs (`MOTOR_MIN`) não para nenhum deles.
+- **Sentido do gesto**: se no seu rádio "yaw para a direita" der pulso baixo, troque `STICK_HIGH`/`STICK_LOW` na lógica de `Update_Safety()`.
 
 ---
 
 ## 3. Achados ainda NÃO corrigidos (por prioridade)
 
 ### Segurança
-1. **Não há failsafe.** Sem sinal do rádio, `T_alto` mantém o último valor e o drone continua voando com ele. Seria preciso um timeout por canal (ex.: 100 ms sem pulso → descer ou cortar).
-2. **Não há armar/desarmar.** Os motores giram assim que o throttle passa de 1100 µs, inclusive ao ligar com o stick fora do mínimo.
-3. **A saída dos motores não tem limite mínimo nem tratamento de saturação.** `Throttle − 450` pode ir abaixo da rotação mínima do ESC (motor parando em voo). Seria preciso limitar entre marcha lenta e máximo e deslocar os 4 motores juntos quando saturar.
+1–3. ~~Failsafe, armar/desarmar e limites dos motores~~ → **feitos** (seção 2, item 7). Restam as pendências de configuração listadas lá.
 
 ### Qualidade do controle
 4. **Média móvel de 6 amostras no giroscópio**: ~6 ms de atraso de fase na malha de taxa, o maior limitante de ganho. Trocar por um passa-baixa de 1ª ordem ou biquad (~80 Hz).
@@ -80,9 +94,8 @@ Commit "Corrige cascata, banda morta do PID e yaw do modo angulo":
 10. **Euler integrado direto das taxas do corpo**: ao girar no yaw inclinado, a inclinação migra entre roll e pitch. Quaternion ou DCM resolvem (`DCM.h`/`Math.ino` existem, sem uso).
 
 ### Menores
-- `Throttle.T_alto=1930` escreve numa variável que a interrupção também altera (é melhor usar uma cópia local).
-- `#include "I2Cdev.h"` e `<PWM.h>` parecem não ser usados.
-- Fora de 1000–2100 µs, o stick mantém o valor anterior em vez de ir para o centro.
+- ~~`Throttle.T_alto=1930` escrito no loop~~, ~~includes sem uso~~ e ~~stick fora da faixa mantendo o valor anterior~~ → resolvidos.
+- 7 (windup no chão) ficou **parcialmente** resolvido: armado com throttle < 1100, os PIDs ficam zerados. Mas com throttle acima de 1100 e o drone ainda no chão, o I da malha de ângulo ainda acumula.
 
 ---
 
@@ -118,6 +131,6 @@ Registradores escritos (conferidos com teste de I²C simulado no PC):
 ## 5. Próximos passos sugeridos
 
 1. Compilar com `arduino-cli` (core `arduino:sam` + as 2 bibliotecas Adafruit) e fazer a checagem em bancada da seção 4.
-2. Itens de segurança 1–3 (failsafe, armar, limites e saturação dos motores).
+2. Bancada **sem hélices**: testar armar/desarmar, LED, failsafe (desligar o rádio) e as pendências de configuração da seção 2.
 3. Itens 4 e 6 (filtro do giroscópio e laço síncrono a 400 Hz), provavelmente o maior ganho de estabilidade.
 4. Revisar 5, 7 e 9; depois considerar 10.

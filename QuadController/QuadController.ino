@@ -8,6 +8,7 @@
 #include <Adafruit_Sensor.h>      // biblioteca oficial (tipos sensors_event_t)
 #include <Adafruit_BMP085_U.h>    // biblioteca oficial (barometro)
 #include "GY80.h"                 // drivers proprios: ADXL345 e L3G4200D
+#include "Safety.h"               // armar/desarmar, failsafe, limites dos motores
    
 Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
 int compass_flag=0;
@@ -234,20 +235,32 @@ timer = millis();
      NVIC_DisableIRQ(TC8_IRQn) ;
      NVIC_DisableIRQ(TC0_IRQn) ;
      */
-    if (Yaw.T_alto < 1484 && Yaw.T_alto>1000 ) 
-      Yaw_Position = (1484 - Yaw.T_alto)*-31;
-    else if (Yaw.T_alto < 2100 && Yaw.T_alto>1000)
-      Yaw_Position = (Yaw.T_alto - 1484  ) *31;
+    // Copia local dos pulsos (a interrupcao pode muda-los a qualquer momento).
+    int thr_us   = Throttle.T_alto;
+    int roll_us  = Roll.T_alto;
+    int pitch_us = Pitch.T_alto;
+    int yaw_us   = Yaw.T_alto;
+    Pitch.Flag = 0;
+    Roll.Flag = 0;
+    Yaw.Flag = 0;
+    Throttle.Flag = 0;
 
-    if (Roll.T_alto < 1484 && Roll.T_alto>1000 )
-      Roll_Position = (1484 - Roll.T_alto)*19;
-    else if (Roll.T_alto < 2100 && Roll.T_alto>1000)
-      Roll_Position = (Roll.T_alto - 1484  ) * -19;
+    // Frame so vale se todos os pulsos estiverem na faixa; senao e descartado
+    // e, se faltar frame valido por RC_TIMEOUT_MS, entra o failsafe.
+    if (RC_Pulse_Valid(thr_us) && RC_Pulse_Valid(roll_us) &&
+        RC_Pulse_Valid(pitch_us) && RC_Pulse_Valid(yaw_us)) {
+    rc_last_frame = millis();
+    rc_ever_valid = true;
+    rc_throttle = thr_us;
+    rc_yaw_raw = yaw_us;
 
-    if (Pitch.T_alto < 1484 && Pitch.T_alto>1000 )
-      Pitch_Position = (1484 - Pitch.T_alto) *-19;
-    else if (Pitch.T_alto < 2100 && Pitch.T_alto>1000)
-     Pitch_Position = (Pitch.T_alto - 1484  ) *19;
+    // Em failsafe os sticks e a chave de modo sao ignorados ate desarmar.
+    if (flight_state != STATE_FAILSAFE) {
+
+    // Mesmas escalas e sinais de antes, com o pulso limitado a 1000-2000 us.
+    Yaw_Position   = (constrain(yaw_us,   1000, 2000) - RC_CENTER) *  31;
+    Roll_Position  = (constrain(roll_us,  1000, 2000) - RC_CENTER) * -19;
+    Pitch_Position = (constrain(pitch_us, 1000, 2000) - RC_CENTER) *  19;
 
 
     if(Ch6.T_alto<1400){
@@ -311,17 +324,14 @@ timer = millis();
   RollRate_Setpoint = Roll_Position;
   PitchRate_Setpoint = Pitch_Position;
   YawRate_Setpoint = Yaw_Position;
-  
-  
+  }
+    } // fora do failsafe
+    } // frame valido
   }
 
-
-    //CaptureInt_Disabled = 1;
-    Pitch.Flag = 0;
-    Roll.Flag = 0;
-    Yaw.Flag = 0;
-    Throttle.Flag = 0;
-  }
+  // Estados de seguranca. Em failsafe forca o modo Angle nivelado e ignora os
+  // sticks, por isso vem antes das malhas de controle.
+  Update_Safety();
   
   
   if(anglemode){
@@ -357,35 +367,9 @@ timer = millis();
   RollRate_PID.Compute() ;
   YawRate_PID.Compute() ;
 
-  if (Throttle.T_alto >= 1100) {
-    if(Throttle.T_alto >= 1930) Throttle.T_alto=1930;
-    M1_out = Throttle.T_alto  + RollRate_Output + PitchRate_Output  - YawRate_Output;
-
-    M2_out = Throttle.T_alto  - RollRate_Output  + PitchRate_Output + YawRate_Output;
-
-    M3_out = Throttle.T_alto  - RollRate_Output - PitchRate_Output - YawRate_Output;
-
-    M4_out = Throttle.T_alto  + RollRate_Output  - PitchRate_Output + YawRate_Output;
-  }
-  else {
-    M1_out = 1000;
-    M2_out = 1000;
-    M3_out = 1000;
-    M4_out = 1000;
-    RollRate_PID.Reset();
-    PitchRate_PID.Reset();
-    YawRate_PID.Reset();
-    Roll_PID.Reset();
-    Pitch_PID.Reset();
-    Yaw_PID.Reset();
-    Yaw_Setpoint = Yaw_Input;  // no chao: decola segurando a proa atual
-
-  }
-
-  Motor1.writeMicroseconds(M1_out);
-  Motor2.writeMicroseconds(M2_out);
-  Motor3.writeMicroseconds(M3_out);
-  Motor4.writeMicroseconds(M4_out);
+  // Limites, saturacao e estados (desarmado / no chao / em voo): Output.ino.
+  Mix_Motors();
+  Update_LED();
 
 #if 1
   long t2 = micros();
@@ -471,8 +455,6 @@ Serial.println(TO_DEG(MAG_Heading));
    /*
 
  */
- led_value=~led_value;
- digitalWrite(STATUS_LED_PIN, led_value);
 
     /*
     //Serial.println( ( Loop_Time - endtime) );

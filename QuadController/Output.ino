@@ -106,3 +106,77 @@ if(compass_flag){
 }
 }
 
+
+/*
+ * Saida dos motores (constantes em Safety.h). Mixer em X:
+ *   M1 = T + R + P - Y    M2 = T - R + P + Y
+ *   M3 = T - R - P - Y    M4 = T + R - P + Y
+ * Em voo cada motor fica em [MOTOR_MIN, MOTOR_MAX]. Prioridade para a atitude:
+ * se as correcoes nao cabem na faixa, elas sao reduzidas na mesma proporcao;
+ * depois o throttle e deslocado para que todos os motores caibam.
+ */
+void Mix_Motors(){
+  double m[4];
+  bool saturated = false;
+
+  if(flight_state == STATE_DISARMED){
+    for(int i=0;i<4;i++) m[i] = MOTOR_OFF;
+    Reset_Controllers();
+  }
+  else{
+    double thr = (flight_state == STATE_FAILSAFE) ? fs_throttle : rc_throttle;
+
+    if(thr < THROTTLE_LOW){
+      // Armado no chao: helices girando devagar, PIDs zerados.
+      for(int i=0;i<4;i++) m[i] = MOTOR_IDLE;
+      Reset_Controllers();
+    }
+    else{
+      if(thr > THROTTLE_MAX_IN) thr = THROTTLE_MAX_IN;
+
+      double c[4];
+      c[0] =  RollRate_Output + PitchRate_Output - YawRate_Output;
+      c[1] = -RollRate_Output + PitchRate_Output + YawRate_Output;
+      c[2] = -RollRate_Output - PitchRate_Output - YawRate_Output;
+      c[3] =  RollRate_Output - PitchRate_Output + YawRate_Output;
+
+      double cmax = c[0], cmin = c[0];
+      for(int i=1;i<4;i++){
+        if(c[i] > cmax) cmax = c[i];
+        if(c[i] < cmin) cmin = c[i];
+      }
+
+      // 1) Correcoes maiores que a faixa util: reduz todas proporcionalmente.
+      double range = MOTOR_MAX - MOTOR_MIN;
+      double spread = cmax - cmin;
+      if(spread > range){
+        double k = range / spread;
+        for(int i=0;i<4;i++) c[i] *= k;
+        cmax *= k;
+        cmin *= k;
+        saturated = true;
+      }
+
+      // 2) Desloca o throttle para todos os motores caberem em [MIN, MAX].
+      if(thr + cmax > MOTOR_MAX){ thr = MOTOR_MAX - cmax; saturated = true; }
+      if(thr + cmin < MOTOR_MIN){ thr = MOTOR_MIN - cmin; saturated = true; }
+
+      for(int i=0;i<4;i++) m[i] = thr + c[i];
+    }
+  }
+
+  // Anti-windup: com saida saturada os integradores de taxa nao acumulam.
+  motors_saturated = saturated;
+  RollRate_PID.HoldIntegrator(saturated);
+  PitchRate_PID.HoldIntegrator(saturated);
+  YawRate_PID.HoldIntegrator(saturated);
+
+  M1_out = (int)(m[0] + 0.5);
+  M2_out = (int)(m[1] + 0.5);
+  M3_out = (int)(m[2] + 0.5);
+  M4_out = (int)(m[3] + 0.5);
+  Motor1.writeMicroseconds(M1_out);
+  Motor2.writeMicroseconds(M2_out);
+  Motor3.writeMicroseconds(M3_out);
+  Motor4.writeMicroseconds(M4_out);
+}

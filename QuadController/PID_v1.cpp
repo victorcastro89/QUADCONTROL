@@ -23,6 +23,7 @@ PID_::PID_(double* Input, double* Output, double* Setpoint,
 	Filter_DSTATE = 0;
 	FilterCoefficient=0;
 	error_min = 0;
+	holdI = false;
 	ITerm = 0;
 	lastInput = 0;
 	output = 0;
@@ -63,7 +64,7 @@ bool PID_::Compute()
       /* Banda morta so no integrador: dentro da tolerancia o I fica parado,
          mas P e D continuam atuando e a saida e sempre atualizada.
          (Antes: "error>error_min || error<error_min", sempre verdadeiro.) */
-      if(fabs(error) > error_min){
+      if(!holdI && fabs(error) > error_min){
         ITerm+= (ki * error);
         if(ITerm > outMax) ITerm= outMax;
         else if(ITerm < outMin) ITerm= outMin;
